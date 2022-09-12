@@ -1,8 +1,9 @@
 ```{r}
 knitr::opts_knit$set(root.dir = '~/Dropbox/Itay_paper/')
 library(tidyverse)
-library(vegan)
 library(data.table)
+library(ggplot2)
+library(strucchange)
 ```
 
 ```{r}
@@ -23,6 +24,7 @@ summary(lm(cer$relative_yield_at_heat ~ log10(1+cer$accumulated_heat_units)))
 
 summary(lm(leg$relative_yield_at_heat ~ log10(1+leg$accumulated_heat_units)))
 # p<0.001, adj. R^2=0.14
+
 ```
 
 ```{r}
@@ -63,7 +65,7 @@ summary(lm(leg_dmy$relative_yield_at_heat ~ log10(1+leg_dmy$accumulated_heat_uni
 ```{r}
 # Generating yield reduction as a function of log transformed accumulated heat time figures
 
-# Single data point per study
+# Single data point per study using only the mean value - not shown in paper
 leg <- leg %>%
   add_column(gen_type="legume", .before=1)
 cer <- cer %>%
@@ -80,7 +82,7 @@ ggplot(data = crops, aes(x=accumulated_heat_units_log, y=relative_yield_at_heat,
   xlab("log10(accumulated heat units) (days*degC)")
 ggsave("yield_vs_acc_heat_max500.pdf")
 
-# Dummy data frame
+# Plot the dummy data: legumes vs. cereals
 leg_dmy <- leg_dmy %>%
   add_column(gen_type="legume", .before=1)
 cer_dmy <- cer_dmy %>%
@@ -92,21 +94,28 @@ crops <- crops %>%
 ggplot(data = crops, aes(x=accumulated_heat_units_log, y=relative_yield_at_heat, color=gen_type, group=gen_type)) +
   geom_point(size=1) + 
   theme_classic() + 
-  scale_color_brewer(2, palette = "Paired") + 
+  scale_color_brewer(2, palette = "Accent") + 
   geom_smooth(method='lm', formula= y~x) +
-  xlab("accumulated heat units (days*degC)") + 
-  ylab("Log10 relative yield reduction with heat stress (Days*degC)")
+  xlab("Log10 accumulated heat units (days*degC)") + 
+  ylab("Relative yield under heat stress (%)")
 ggsave("yield_vs_acc_heat_dummy_new_max500.pdf")
 
+# Check whether crop type affects the response to accumulated heat units
+anova(lm(relative_yield_at_heat ~ accumulated_heat_units_log*gen_type, data=crops))
+# p < 2.2e-16, adjusted R^2 = 0.2
+sctest(crops$relative_yield_at_heat ~ crops$accumulated_heat_units, type = "Chow", point=nrow(leg_dmy))
+# p < 1.3e-15, F = 35.3
+
+# Plot yield reduction based only on temperature without stress duration
 crops <- crops %>%
   mutate(delta_temp = T_stress - T_optimal)
 ggplot(data = crops, aes(x=delta_temp, y=relative_yield_at_heat, color=gen_type, group=gen_type)) +
   geom_point(size=1) + 
   theme_classic() + 
-  scale_color_brewer(2, palette = "Paired") + 
+  scale_color_brewer(2, palette = "Accent") + 
   geom_smooth(method='lm', formula= y~x) +
-  xlab("delta temperature (degC)") + 
-  ylab("Log10 relative yield reduction with heat stress (Days*degC)")
+  xlab("Log10 delta temperature (degC)") + 
+  ylab("Relative yield under heat stress (%)")
 ggsave("yield_vs_delta_temp_dummy_new_max500.pdf")
 
 crops_melt <- reshape2::melt(crops, id.vars=c("gen_type", "delta_temp"), measure.vars = "relative_yield_at_heat", value.name="relative_yield_at_heat") %>%
@@ -124,29 +133,33 @@ summary(lm(pts$relative.reduction.in.PS~pts$t.above.optimal*pts$crop_type))
 
 temp <- pts[pts$crop_type=="legumes",]
 summary(lm(formula = temp$relative.reduction.in.PS ~ temp$t.above.optimal))
-# p<0.001, R^2=44%
+# p<0.001, R^2=44%, a=98.2, b=-2.5
 
 temp <- pts[pts$crop_type=="cereals",]
 summary(lm(formula = temp$relative.reduction.in.PS ~ temp$t.above.optimal))
-# p=0.2, R^2=1%
+# p=0.2, R^2=1%, a=75.2, b=-0.7
 
 ggplot(data=pts, aes(x=t.above.optimal, y=relative.reduction.in.PS, group=crop_type, color=crop_type)) + 
   geom_point(size=1)+ 
   theme_classic() + 
-  scale_color_brewer(2, palette = "Paired") + 
+  scale_color_brewer(2, palette = "Accent") + 
   geom_smooth(method='lm', formula = y~x) + 
-  ylab("Reduction in photosynthesis") + 
+  ylab("Photosynthetic rate under stress as % of control") + 
   xlab("Temperature above optimal (degC)")
 ggsave("photosynthesis_by_t.above.opt_bycrop.pdf")
+
+# Testing whether the regressions are significantly different (Chow test)
+sctest(pts$relative.reduction.in.PS ~ pts$t.above.optimal, point = nrow(pts[pts$crop_type == "cereals",]), type="Chow")
+# p = 0.051, F = 3.1
 ```
 ```{r}
-# Data representation
+# Data representation - sup. fig. 1
 ggplot(data=crops, aes(x=Duration_of_stress, y=delta_temp, group=gen_type, color=gen_type)) + 
   geom_point(size=1) + 
   theme_classic() + 
   xlab("Duration of stress (Days)") + 
   ylab("Delta tempature (degC)") + 
-  scale_color_brewer(2, palette = "Paired")
+  scale_color_brewer(2, palette = "Accent")
 ggsave("delta_temp_vs_duration_new.pdf")
 ```
 
