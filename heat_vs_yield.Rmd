@@ -109,9 +109,8 @@ ggplot(data = crops, aes(x=delta_temp, y=relative_yield_at_heat, color=gen_type,
   ylab("Log10 relative yield reduction with heat stress (Days*degC)")
 ggsave("yield_vs_delta_temp_dummy_new_max500.pdf")
 
-crops_melt <- reshape2::melt(crops, id.vars=c("gen_type", "delta_temp"), measure.vars = "relative_yield_at_heat") %>%
-  select(-variable) %>%
-  rename("value" = "relative_yield_at_heat")
+crops_melt <- reshape2::melt(crops, id.vars=c("gen_type", "delta_temp"), measure.vars = "relative_yield_at_heat", value.name="relative_yield_at_heat") %>%
+select(-variable)
 
 crops_lm <- lm(relative_yield_at_heat ~ gen_type*delta_temp, data=crops_melt)
 summary(crops_lm)
