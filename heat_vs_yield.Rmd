@@ -4,6 +4,9 @@ library(tidyverse)
 library(data.table)
 library(ggplot2)
 library(strucchange)
+library(RColorBrewer)
+
+my_pal <- brewer.pal(8, "Paired")[c(2,8)]
 ```
 
 ```{r}
@@ -63,7 +66,8 @@ summary(lm(leg_dmy$relative_yield_at_heat ~ log10(1+leg_dmy$accumulated_heat_uni
 ```
 
 ```{r}
-# Generating yield reduction as a function of log transformed accumulated heat time figures
+# Yield reduction as a function of log transformed accumulated heat time
+# Figure 2
 
 # Single data point per study using only the mean value - not shown in paper
 leg <- leg %>%
@@ -77,7 +81,7 @@ crops <- crops %>%
 ggplot(data = crops, aes(x=accumulated_heat_units_log, y=relative_yield_at_heat, color=gen_type, group=gen_type)) +
   geom_point(size=1) + 
   theme_classic() + 
-  scale_color_brewer(2, palette = "Paired") + 
+  scale_color_manual(values=my_pal) + 
   geom_smooth(method='lm', formula= y~x) +
   xlab("log10(accumulated heat units) (days*degC)")
 ggsave("yield_vs_acc_heat_max500.pdf")
@@ -94,7 +98,7 @@ crops <- crops %>%
 ggplot(data = crops, aes(x=accumulated_heat_units_log, y=relative_yield_at_heat, color=gen_type, group=gen_type)) +
   geom_point(size=1) + 
   theme_classic() + 
-  scale_color_brewer(2, palette = "Accent") + 
+  scale_color_manual(values=my_pal) + 
   geom_smooth(method='lm', formula= y~x) +
   xlab("Log10 accumulated heat units (days*degC)") + 
   ylab("Relative yield under heat stress (%)")
@@ -112,11 +116,16 @@ crops <- crops %>%
 ggplot(data = crops, aes(x=delta_temp, y=relative_yield_at_heat, color=gen_type, group=gen_type)) +
   geom_point(size=1) + 
   theme_classic() + 
-  scale_color_brewer(2, palette = "Accent") + 
+  scale_color_manual(values=my_pal) + 
   geom_smooth(method='lm', formula= y~x) +
   xlab("Log10 delta temperature (degC)") + 
   ylab("Relative yield under heat stress (%)")
 ggsave("yield_vs_delta_temp_dummy_new_max500.pdf")
+
+summary(lm(relative_yield_at_heat ~ delta_temp, data=subset(crops, gen_type=="cereal")))
+# p=1.8e-5, adjusted R^2=0.031
+summary(lm(relative_yield_at_heat ~ delta_temp, data=subset(crops, gen_type=="legume")))
+# p=3.6e-5, adjusted R^2=0.026
 
 crops_melt <- reshape2::melt(crops, id.vars=c("gen_type", "delta_temp"), measure.vars = "relative_yield_at_heat", value.name="relative_yield_at_heat") %>%
 select(-variable)
@@ -127,7 +136,7 @@ summary(crops_lm)
 ```
 
 ```{r}
-# Photosynthesis under stress
+# Photosynthesis under stress - Figure 1
 summary(lm(pts$relative.reduction.in.PS~pts$t.above.optimal*pts$crop_type))
 # p(temp) NS, p(croptype) = 0.02, p(interaction)=0.064, R^2=22%
 
@@ -142,7 +151,7 @@ summary(lm(formula = temp$relative.reduction.in.PS ~ temp$t.above.optimal))
 ggplot(data=pts, aes(x=t.above.optimal, y=relative.reduction.in.PS, group=crop_type, color=crop_type)) + 
   geom_point(size=1)+ 
   theme_classic() + 
-  scale_color_brewer(2, palette = "Accent") + 
+  scale_color_manual(values=my_pal) + 
   geom_smooth(method='lm', formula = y~x) + 
   ylab("Photosynthetic rate under stress as % of control") + 
   xlab("Temperature above optimal (degC)")
@@ -159,7 +168,7 @@ ggplot(data=crops, aes(x=Duration_of_stress, y=delta_temp, group=gen_type, color
   theme_classic() + 
   xlab("Duration of stress (Days)") + 
   ylab("Delta tempature (degC)") + 
-  scale_color_brewer(2, palette = "Accent")
+  scale_color_manual(values=my_pal)
 ggsave("delta_temp_vs_duration_new.pdf")
 ```
 
