@@ -83,7 +83,7 @@ ggplot(data = crops, aes(x=accumulated_heat_units_log, y=relative_yield_at_heat,
   scale_color_manual(values=my_pal) + 
   geom_smooth(method='lm', formula= y~x) +
   xlab("log10(cumulative heat units) (days*degC)")
-ggsave("yield_vs_acc_heat_max500_singlepoint.pdf")
+ggsave("yield_vs_acc_heat_max500_singlepoint.pdf", dpi=300)
 
 # Plot the dummy data: legumes vs. cereals
 leg_dmy <- leg_dmy %>%
@@ -101,7 +101,7 @@ ggplot(data = crops, aes(x=accumulated_heat_units_log, y=relative_yield_at_heat,
   geom_smooth(method='lm', formula= y~x) +
   xlab("Log10 cumulative heat units (days*degC)") + 
   ylab("Relative yield under heat stress (%)")
-ggsave("yield_vs_acc_heat_dummy_new_max500.pdf")
+ggsave("yield_vs_acc_heat_dummy_new_max500.pdf", dpi=300)
 
 # Plot yield reduction based only on temperature without stress duration
 crops <- crops %>%
@@ -113,7 +113,7 @@ ggplot(data = crops, aes(x=delta_temp, y=relative_yield_at_heat, color=gen_type,
   geom_smooth(method='lm', formula= y~x) +
   xlab("Log10 delta temperature (degC)") + 
   ylab("Relative yield under heat stress (%)")
-ggsave("yield_vs_delta_temp_dummy_new_max500.pdf")
+ggsave("yield_vs_delta_temp_dummy_new_max500.pdf", dpi=300)
 
 summary(lm(relative_yield_at_heat ~ delta_temp, data=subset(crops, gen_type=="cereal")))
 # p=1.8e-5, adjusted R^2=0.031
@@ -160,11 +160,15 @@ ggplot(data=pts, aes(x=t.above.optimal, y=relative.reduction.in.PS, group=crop_t
   geom_smooth(method='lm', formula = y~x) + 
   ylab("Photosynthetic rate under stress as % of control") + 
   xlab("Temperature above optimal (degC)")
-ggsave("photosynthesis_by_t.above.opt_bycrop.pdf")
+ggsave("photosynthesis_by_t.above.opt_bycrop.pdf", dpi=300)
 
-# Testing whether the regressions are significantly different (Chow test)
-sctest(pts$relative.reduction.in.PS ~ pts$t.above.optimal, point = nrow(pts[pts$crop_type == "cereals",]), type="Chow")
-# p = 0.051, F = 3.1
+# Test photosynthetic rate with multiple regression
+pts_melt <- reshape2::melt(pts, id.vars=c("crop_type", "t.above.optimal"), measure.vars = "relative.reduction.in.PS", value.name="relative.reduction.in.PS") %>%
+select(-variable)
+
+crops_lm <- lm(relative.reduction.in.PS ~ crop_type*t.above.optimal, data=pts_melt)
+summary(crops_lm)
+# crop_type:t.above.optimal p = 0.06, adjusted R^2 = 0.22
 ```
 ```{r}
 # Data representation - sup. fig. 1
