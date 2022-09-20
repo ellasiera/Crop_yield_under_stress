@@ -3,7 +3,6 @@ knitr::opts_knit$set(root.dir = '~/Dropbox/Itay_paper/')
 library(tidyverse)
 library(data.table)
 library(ggplot2)
-library(strucchange)
 library(RColorBrewer)
 
 my_pal <- brewer.pal(8, "Paired")[c(2,8)]
@@ -83,8 +82,8 @@ ggplot(data = crops, aes(x=accumulated_heat_units_log, y=relative_yield_at_heat,
   theme_classic() + 
   scale_color_manual(values=my_pal) + 
   geom_smooth(method='lm', formula= y~x) +
-  xlab("log10(accumulated heat units) (days*degC)")
-ggsave("yield_vs_acc_heat_max500.pdf")
+  xlab("log10(cumulative heat units) (days*degC)")
+ggsave("yield_vs_acc_heat_max500_singlepoint.pdf")
 
 # Plot the dummy data: legumes vs. cereals
 leg_dmy <- leg_dmy %>%
@@ -100,15 +99,9 @@ ggplot(data = crops, aes(x=accumulated_heat_units_log, y=relative_yield_at_heat,
   theme_classic() + 
   scale_color_manual(values=my_pal) + 
   geom_smooth(method='lm', formula= y~x) +
-  xlab("Log10 accumulated heat units (days*degC)") + 
+  xlab("Log10 cumulative heat units (days*degC)") + 
   ylab("Relative yield under heat stress (%)")
 ggsave("yield_vs_acc_heat_dummy_new_max500.pdf")
-
-# Check whether crop type affects the response to accumulated heat units
-anova(lm(relative_yield_at_heat ~ accumulated_heat_units_log*gen_type, data=crops))
-# p < 2.2e-16, adjusted R^2 = 0.2
-sctest(crops$relative_yield_at_heat ~ crops$accumulated_heat_units, type = "Chow", point=nrow(leg_dmy))
-# p < 1.3e-15, F = 35.3
 
 # Plot yield reduction based only on temperature without stress duration
 crops <- crops %>%
@@ -125,20 +118,32 @@ ggsave("yield_vs_delta_temp_dummy_new_max500.pdf")
 summary(lm(relative_yield_at_heat ~ delta_temp, data=subset(crops, gen_type=="cereal")))
 # p=1.8e-5, adjusted R^2=0.031
 summary(lm(relative_yield_at_heat ~ delta_temp, data=subset(crops, gen_type=="legume")))
-# p=3.6e-5, adjusted R^2=0.026
 
+# Test delta temperature with multiple regression
 crops_melt <- reshape2::melt(crops, id.vars=c("gen_type", "delta_temp"), measure.vars = "relative_yield_at_heat", value.name="relative_yield_at_heat") %>%
 select(-variable)
 
 crops_lm <- lm(relative_yield_at_heat ~ gen_type*delta_temp, data=crops_melt)
 summary(crops_lm)
 # gen_type:delta_temp p = 0.15
+
+# Test cumulative heat units with multiple regression
+crops_melt <- reshape2::melt(crops, id.vars=c("gen_type", "accumulated_heat_units"), measure.vars = "relative_yield_at_heat", value.name="relative_yield_at_heat") %>%
+select(-variable)
+
+crops_lm <- lm(relative_yield_at_heat ~ gen_type*accumulated_heat_units, data=crops_melt)
+summary(crops_lm)
+# gen_type:accumulated_heat_units p = 0.003, adjusted R^2 = 0.16
 ```
 
 ```{r}
 # Photosynthesis under stress - Figure 1
 summary(lm(pts$relative.reduction.in.PS~pts$t.above.optimal*pts$crop_type))
 # p(temp) NS, p(croptype) = 0.02, p(interaction)=0.064, R^2=22%
+
+#regression equations for photosynthesis
+summary(lm(relative.reduction.in.PS~t.above.optimal, data = subset(pts, crop_type == "cereals")))
+summary(lm(relative.reduction.in.PS~t.above.optimal, data = subset(pts, crop_type == "legumes")))
 
 temp <- pts[pts$crop_type=="legumes",]
 summary(lm(formula = temp$relative.reduction.in.PS ~ temp$t.above.optimal))
