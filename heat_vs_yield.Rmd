@@ -1,0 +1,306 @@
+```{r setup}
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+library(tidyverse)
+library(data.table)
+library(ggplot2)
+library(RColorBrewer)
+library(metafor)
+library(ggpubr)
+library(heatmap3)
+library(ggResidpanel)
+library(performance)
+my_pal <- brewer.pal(8, "Paired")[c(2,8)]
+```
+
+```{r}
+# Load data tables
+pts <- read.csv("photosynthesis.csv", header = T)
+cer <- read.delim("Cereals.txt", header = T, sep="\t", stringsAsFactors = F) %>%
+  filter(!is.na(rel_yield_heat)) %>%
+  filter(!is.na(delT)) %>%
+  filter(delT > 0) %>%
+  mutate(crop = "Cer") %>%
+  select(!starts_with("X")) %>%
+  select(n, Duration_Days, delT, yield_difference, rel_yield_heat, crop, sd_control, sd_heat) %>%
+  mutate(across(everything(), gsub, pattern = ",", replacement = "\\.")) %>%
+  mutate(across(!crop, as.numeric)) %>%
+  mutate(SE_control = sd_control/sqrt(n)) %>%
+  mutate(SE_heat = sd_heat/sqrt(n)) %>%
+  mutate(accumulated_heat_units = Duration_Days*delT) %>%
+  na.exclude
+leg <- read.delim("Legumes.txt", header = T, sep="\t", stringsAsFactors = F) %>%
+  filter(!is.na(rel_yield_heat)) %>%
+  filter(!is.na(delT)) %>%
+  filter(delT > 0) %>%
+  mutate(crop = "Leg") %>%
+  select(!starts_with("X")) %>%
+  select(n, Duration_Days, delT, yield_difference, rel_yield_heat, sd_control, sd_heat, crop) %>%
+  mutate(across(everything(), gsub, pattern = ",", replacement = "\\.")) %>%
+  mutate(across(!crop, as.numeric)) %>%
+  mutate(SE_control = sd_control/sqrt(n)) %>%
+  mutate(SE_heat = sd_heat/sqrt(n)) %>%
+  mutate(accumulated_heat_units = Duration_Days*delT)
+  na.exclude
+
+# Set up dataframe for analysis of yield vs. duration, temperature difference and crop type (legumes vs. cereals)
+newDF <- data.frame(rbind(cer, leg)) %>%
+  mutate(SE_max = pmax(SE_control, SE_heat, na.rm = T)) %>%
+  mutate(accumulated_heat_units = Duration_Days*delT) %>%
+  mutate(sp = sqrt(((n-1)*(sd_control^2 + sd_heat^2))/((n*2)-2))) %>%
+  mutate(reg_wt = 1/(sp*(sqrt(2/n)))) %>%
+  mutate(crop_code = case_when(
+    crop == "Cer" ~ 0,
+    crop == "Leg" ~ 1
+  )) %>%
+  na.exclude %>%
+  filter(accumulated_heat_units < 900)
+```
+```{r}
+# Linear regression
+lm_wt <- lm(data = newDF, rel_yield_heat ~ accumulated_heat_units*crop_code, weights=reg_wt)
+summary(lm_wt) 
+# Using crop as is
+# Weighted Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -144.912  -13.463    2.597   20.094  145.584 
+# 
+# Coefficients:
+#                                Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)                    75.63560    3.56991  21.187  < 2e-16 ***
+# accumulated_heat_units         -0.13990    0.02009  -6.965  1.2e-10 ***
+# cropLeg                        -3.62118    6.55952  -0.552   0.5818    
+# accumulated_heat_units:cropLeg  0.08194    0.03163   2.590   0.0106 * 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 40.2 on 139 degrees of freedom
+# Multiple R-squared:  0.2967,	Adjusted R-squared:  0.2816 
+# F-statistic: 19.55 on 3 and 139 DF,  p-value: 1.24e-10
+```
+
+
+```{r}
+# Visualize residuals diagnostics
+resid_panel(lm_wt)
+```
+
+```{r}
+# Find outliers in the data
+infl = influence(lm_wt)
+str(infl)
+plot(newDF$accumulated_heat_units, infl$hat)
+# Conclusion: throw out the two data point with accumulated heat units > 900
+```
+
+
+```{r}
+# Try other models
+lm_wt2 <- lm(data = newDF, rel_yield_heat ~ poly(accumulated_heat_units, 2)*crop_code, weights=reg_wt) # x^2
+lm_wt3 <- lm(data = newDF, rel_yield_heat ~ poly(accumulated_heat_units, 3)*crop_code, weights=reg_wt) # x^3
+
+compare_performance(lm_wt, lm_wt2, lm_wt3)
+
+lm_preds <- emmeans(lm_wt3,  ~ crop_code*accumulated_heat_units, 
+                    at = list(accumulated_heat_units = seq(10, 1200, 10)))
+lm_preds %>% 
+  as.data.frame() %>% 
+  ggplot(aes(x = accumulated_heat_units, y = emmean))+
+  facet_grid(cols = vars(crop_code))+
+  geom_line() +
+  geom_point(data = newDF, aes(y = rel_yield_heat))+
+  coord_cartesian(ylim = c(0, 100))
+```
+
+
+```{r}
+# More complex model without mutiplying duration and temperature difference between stress and control
+summary(lm(data = newDF, rel_yield_heat ~ Duration_Days*delT*crop_code, weights=reg_wt)) 
+# Weighted Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -145.895  -14.294   -0.047   17.782  145.156 
+# 
+# Coefficients:
+#                              Estimate Std. Error t value Pr(>|t|)
+# (Intercept)                   86.90433   17.02437   5.105  1.1e-06 ***
+# Duration_Days                 -0.65515    1.14477  -0.572    0.568    
+# delT                          -0.80881    1.18539  -0.682    0.496    
+# crop_code                    -29.91431   24.04655  -1.244    0.216    
+# Duration_Days:delT            -0.09209    0.08255  -1.116    0.267    
+# Duration_Days:crop_code        1.07023    1.23574   0.866    0.388    
+# delT:crop_code                 2.47279    2.16147   1.144    0.255    
+# Duration_Days:delT:crop_code  -0.01553    0.10203  -0.152    0.879
+# 
+# Residual standard error: 40.58 on 135 degrees of freedom
+# Multiple R-squared:  0.3038,	Adjusted R-squared:  0.2677 
+# F-statistic: 8.416 on 7 and 135 DF,  p-value: 1.608e-08
+
+# Temperature effect alone
+summary(lm(data = newDF, rel_yield_heat ~ delT*crop_code, weights=reg_wt)) 
+# Weighted Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -221.916  -10.961    4.955   21.417  195.176 
+# 
+# Coefficients:
+#                Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)     71.0076     9.1300   7.777  1.5e-12 ***
+# delT            -1.2542     0.6477  -1.936   0.0549 .  
+# crop_code      -10.4263    13.8669  -0.752   0.4534    
+# delT:crop_code   1.3019     1.3398   0.972   0.3329    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 46.76 on 139 degrees of freedom
+# Multiple R-squared:  0.04851,	Adjusted R-squared:  0.02798 
+# F-statistic: 2.362 on 3 and 139 DF,  p-value: 0.07394
+
+# Duration of stress alone
+lm_wt_dur <- lm(data = newDF, rel_yield_heat ~ Duration_Days*crop_code, weights=reg_wt)
+summary(lm_wt_dur) 
+# Weighted Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -177.622  -10.036    2.717   21.426  131.336 
+# 
+# Coefficients:
+#                         Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)              73.5197     3.9393  18.663  < 2e-16 ***
+# Duration_Days            -1.6972     0.2996  -5.664 8.18e-08 ***
+# crop_code                -5.4685     6.7621  -0.809     0.42    
+# Duration_Days:crop_code   1.4170     0.3498   4.051 8.43e-05 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 42.41 on 139 degrees of freedom
+# Multiple R-squared:  0.2171,	Adjusted R-squared:  0.2002 
+# F-statistic: 12.85 on 3 and 139 DF,  p-value: 1.851e-07
+compare_performance(lm_wt, lm_wt_dur)
+# It looks like duration alone is the better model based on AIC and BIC but it explains less of the variance (R2)
+```
+
+```{r}
+# Plot data distributions
+
+# Yield difference
+h1 <- ggplot(newDF, aes(x = yield_difference, fill = crop)) + 
+  geom_histogram() + theme_classic() + ylab("Frequency") + 
+  xlab("Log10 yield difference heat vs. control") + scale_x_continuous(trans='log10')
+ks.test(newDF$yield_difference[newDF$crop=="Cer"], newDF$yield_difference[newDF$crop=="Leg"], alternative = "less")
+# p<0.001, Legumes have a lower difference in yield between stress and control
+
+# Relative yield
+h2 <- ggplot(newDF, aes(x = 1+rel_yield_heat, fill = crop)) + 
+  geom_histogram(bins=15) + theme_classic() + ylab("Frequency") + 
+  xlab("Relative yield heat vs. control")
+ks.test(newDF$rel_yield_heat[newDF$crop=="Cer"], newDF$rel_yield_heat[newDF$crop=="Leg"], alternative = "greater")
+# p<0.001, Legumes have a higher mean relative yield at heat compared to cereals
+
+# Delta temperature
+h3 <- ggplot(newDF, aes(x = delT, fill = crop)) + 
+  geom_histogram(bins=15) + theme_classic() + ylab("Frequency") + 
+  xlab("Experimental temprature difference heat vs. control (degrees C)")
+
+# Duration of experiment
+h4 <- ggplot(newDF, aes(x = Duration_Days, fill = crop)) + 
+  geom_histogram(bins=15) + theme_classic() + ylab("Frequency") + 
+  xlab("Experimental duration heat vs. control (Days)")
+
+
+ggarrange(h1, h2, h3, h4, nrow=2, ncol=2)
+ggsave("fig_S1_data_hists.pdf", width=8, height=8)
+
+```
+
+
+```{r}
+# Plot weighted regressions
+cer <- newDF %>% filter(crop=="Cer")
+leg <- newDF %>% filter(crop=="Leg") %>% filter(accumulated_heat_units <= 250)
+# Figure 2 A
+pcer <- ggplot(data=cer, aes(x=delT, y=rel_yield_heat)) + 
+  geom_point(shape=1, aes(size=reg_wt)) + theme_bw() + xlab("Temperature difference at heat stress vs. control (degrees C)") + 
+  ylab("Relative yield at heat stress") + 
+  geom_smooth(method='lm', mapping = aes(weight = reg_wt), colour="orange") + 
+  stat_regline_equation(show.legend = F, label.x.npc = "left", label.y.npc = "top") +
+  stat_cor(label.x.npc = "center", label.y.npc = "top") +
+  ggtitle("Cereals")
+pleg <- ggplot(data=leg, aes(x=delT, y=rel_yield_heat)) + 
+  geom_point(shape=1, aes(size=reg_wt)) + theme_bw() + xlab("Temperature difference at heat stress vs. control (degrees C)") + 
+  ylab("Relative yield at heat stress") + 
+  geom_smooth(method='lm', mapping = aes(weight = reg_wt)) + 
+  stat_regline_equation(show.legend = F, label.x.npc = "left", label.y.npc = "top") +
+  stat_cor(label.x.npc = "center", label.y.npc = "top") + 
+  scale_y_continuous(breaks = c(0,25,50,75,100), labels = as.character(c(0,25,50,75,100))) +
+  ggtitle("Legumes")
+ggarrange(pcer, pleg, nrow=1, ncol=2)
+ggsave("fig2A_new_ggplot.pdf", width=8.3, height=6)
+# Figure 2 B
+pcer <- ggplot(data=cer, aes(x=accumulated_heat_units, y=rel_yield_heat)) + 
+  geom_point(shape=1, aes(size=reg_wt)) + theme_bw() + xlab("Accumulated heat units (Days * degrees C)") + 
+  ylab("Relative yield at heat stress") + 
+  geom_smooth(method='lm', mapping = aes(weight = reg_wt), colour="orange") + 
+  stat_regline_equation(show.legend = F, label.x.npc = "left", label.y.npc = "top") +
+  stat_cor(label.x.npc = "center", label.y.npc = "top") +
+  ggtitle("Cereals")
+pleg <- ggplot(data=leg, aes(x=accumulated_heat_units, y=rel_yield_heat)) + 
+  geom_point(shape=1, aes(size=reg_wt)) + theme_bw() + xlab("Accumulated heat units (Days * degrees C)") + 
+  ylab("Relative yield at heat stress") + 
+  geom_smooth(method='lm', mapping = aes(weight = reg_wt)) + 
+  stat_regline_equation(show.legend = F, label.x.npc = "left", label.y.npc = "top") +
+  stat_cor(label.x.npc = "center", label.y.npc = "top") + 
+  scale_y_continuous(breaks = c(0,25,50,75,100), labels = as.character(c(0,25,50,75,100))) +
+  ggtitle("Legumes")
+ggarrange(pcer, pleg, nrow=1, ncol=2)
+ggsave("fig2B_new_ggplot.pdf", width=8.3, height=6)
+```
+```{r}
+# Photosynthesis under stress - Figure 1
+summary(lm(pts$relative.reduction.in.PS~pts$t.above.optimal*pts$crop_type))
+# p(temp) NS, p(croptype) = 0.02, p(interaction)=0.064, R^2=22%
+
+#regression equations for photosynthesis
+summary(lm(relative.reduction.in.PS~t.above.optimal, data = subset(pts, crop_type == "cereals")))
+summary(lm(relative.reduction.in.PS~t.above.optimal, data = subset(pts, crop_type == "legumes")))
+
+temp <- pts[pts$crop_type=="legumes",]
+summary(lm(formula = temp$relative.reduction.in.PS ~ temp$t.above.optimal))
+# p<0.001, R^2=44%, a=98.2, b=-2.5
+
+temp <- pts[pts$crop_type=="cereals",]
+summary(lm(formula = temp$relative.reduction.in.PS ~ temp$t.above.optimal))
+# p=0.2, R^2=1%, a=75.2, b=-0.7
+
+# Figure 1
+pts <- pts %>% filter(sd_control!="" & sd_stress!="") %>%
+  mutate(n = n_stress) %>%
+  mutate(across(2:ncol(pts), ~ gsub(",", "\\.", .))) %>%
+  mutate(across(2:ncol(pts), as.numeric)) %>%
+  mutate(sp = sqrt(((n-1)*(sd_control^2 + sd_stress^2))/((n*2)-2))) %>%
+  mutate(reg_wt = 1/(sp*(sqrt(2/n)))) %>%
+  mutate(delT = t_stress - t_op)
+cer <- pts %>% filter(crop=="cereals")
+leg <- pts %>% filter(crop=="legumes")
+pcer <- ggplot(data=cer, aes(x=delT, y=relative_reduction_in_PS)) + 
+  geom_point(shape=1, aes(size=reg_wt)) + theme_bw() + xlab("Temperature difference at heat stress vs. control (degrees C)") + 
+  ylab("Photosynthetic rate under stress as % of control") + 
+  geom_smooth(method='lm', mapping = aes(weight = reg_wt), colour="orange") + 
+  stat_regline_equation(show.legend = F, label.x.npc = "left", label.y.npc = "top") +
+  stat_cor(label.x.npc = "center", label.y.npc = "top") +
+  ggtitle("Cereals")
+pleg <- ggplot(data=leg, aes(x=delT, y=relative_reduction_in_PS)) + 
+  geom_point(shape=1, aes(size=reg_wt)) + theme_bw() + xlab("Temperature difference at heat stress vs. control (degrees C)") + 
+  ylab("Photosynthetic rate under stress as % of control") + 
+  geom_smooth(method='lm', mapping = aes(weight = reg_wt)) + 
+  stat_regline_equation(show.legend = F, label.x.npc = "left", label.y.npc = "top") +
+  stat_cor(label.x.npc = "center", label.y.npc = "top") + 
+  scale_y_continuous(breaks = c(0,25,50,75,100), labels = as.character(c(0,25,50,75,100))) +
+  ggtitle("Legumes")
+ggarrange(pcer, pleg, nrow=1, ncol=2)
+ggsave("fig1_new_ggplot.pdf")
+
+# Test photosynthetic rate with multiple regression
+pts_melt <- reshape2::melt(pts, id.vars=c("crop_type", "t.above.optimal"), measure.vars = "relative.reduction.in.PS", value.name="relative.reduction.in.PS") %>%
+select(-variable)
+
+crops_lm <- lm(relative.reduction.in.PS ~ crop_type*t.above.optimal, data=pts_melt)
+summary(crops_lm)
+# crop_type:t.above.optimal p = 0.06, adjusted R^2 = 0.22
+```
