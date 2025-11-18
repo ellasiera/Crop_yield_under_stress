@@ -14,7 +14,10 @@ my_pal <- brewer.pal(8, "Paired")[c(2,8)]
 
 ```{r}
 # Load data tables
-pts <- read.csv("photosynthesis.csv", header = T)
+pts <- read.csv("photosynthesis.csv", header = T) %>% 
+  mutate(relative_reduction_in_PS = gsub(",", "\\.", relative_reduction_in_PS)) %>%
+  mutate(t_above_optimal = gsub(",", "\\.", t_above_optimal)) %>%
+  mutate(t_above_optimal = as.numeric(t_above_optimal), relative_reduction_in_PS = as.numeric(relative_reduction_in_PS))
 cer <- read.delim("Cereals.txt", header = T, sep="\t", stringsAsFactors = F) %>%
   filter(!is.na(rel_yield_heat)) %>%
   filter(!is.na(delT)) %>%
@@ -53,7 +56,7 @@ newDF <- data.frame(rbind(cer, leg)) %>%
     crop == "Leg" ~ 1
   )) %>%
   na.exclude %>%
-  filter(accumulated_heat_units < 900)
+  filter(accumulated_heat_units < 900) # based on influence analysis these points have high leverage
 ```
 ```{r}
 # Linear regression
@@ -94,7 +97,7 @@ plot(newDF$accumulated_heat_units, infl$hat)
 
 
 ```{r}
-# Try other models
+# Try other models - didn't really improve over the linear
 lm_wt2 <- lm(data = newDF, rel_yield_heat ~ poly(accumulated_heat_units, 2)*crop_code, weights=reg_wt) # x^2
 lm_wt3 <- lm(data = newDF, rel_yield_heat ~ poly(accumulated_heat_units, 3)*crop_code, weights=reg_wt) # x^3
 
@@ -113,7 +116,7 @@ lm_preds %>%
 
 
 ```{r}
-# More complex model without mutiplying duration and temperature difference between stress and control
+# More complex model without multiplying duration and temperature difference between stress and control
 summary(lm(data = newDF, rel_yield_heat ~ Duration_Days*delT*crop_code, weights=reg_wt)) 
 # Weighted Residuals:
 #      Min       1Q   Median       3Q      Max 
@@ -173,7 +176,7 @@ summary(lm_wt_dur)
 # Multiple R-squared:  0.2171,	Adjusted R-squared:  0.2002 
 # F-statistic: 12.85 on 3 and 139 DF,  p-value: 1.851e-07
 compare_performance(lm_wt, lm_wt_dur)
-# It looks like duration alone is the better model based on AIC and BIC but it explains less of the variance (R2)
+# It looks like duration alone is a somewhat better model based on AIC and BIC but it explains less of the variance (R2)
 ```
 
 ```{r}
@@ -213,7 +216,7 @@ ggsave("fig_S1_data_hists.pdf", width=8, height=8)
 ```{r}
 # Plot weighted regressions
 cer <- newDF %>% filter(crop=="Cer")
-leg <- newDF %>% filter(crop=="Leg") %>% filter(accumulated_heat_units <= 250)
+leg <- newDF %>% filter(crop=="Leg")
 # Figure 2 A
 pcer <- ggplot(data=cer, aes(x=delT, y=rel_yield_heat)) + 
   geom_point(shape=1, aes(size=reg_wt)) + theme_bw() + xlab("Temperature difference at heat stress vs. control (degrees C)") + 
@@ -223,8 +226,8 @@ pcer <- ggplot(data=cer, aes(x=delT, y=rel_yield_heat)) +
   stat_cor(label.x.npc = "center", label.y.npc = "top") +
   ggtitle("Cereals")
 pleg <- ggplot(data=leg, aes(x=delT, y=rel_yield_heat)) + 
-  geom_point(shape=1, aes(size=reg_wt)) + theme_bw() + xlab("Temperature difference at heat stress vs. control (degrees C)") + 
-  ylab("Relative yield at heat stress") + 
+  geom_point(shape=1, aes(size=reg_wt)) + theme_bw() + 
+  xlab("") + ylab("") + 
   geom_smooth(method='lm', mapping = aes(weight = reg_wt)) + 
   stat_regline_equation(show.legend = F, label.x.npc = "left", label.y.npc = "top") +
   stat_cor(label.x.npc = "center", label.y.npc = "top") + 
@@ -241,8 +244,8 @@ pcer <- ggplot(data=cer, aes(x=accumulated_heat_units, y=rel_yield_heat)) +
   stat_cor(label.x.npc = "center", label.y.npc = "top") +
   ggtitle("Cereals")
 pleg <- ggplot(data=leg, aes(x=accumulated_heat_units, y=rel_yield_heat)) + 
-  geom_point(shape=1, aes(size=reg_wt)) + theme_bw() + xlab("Accumulated heat units (Days * degrees C)") + 
-  ylab("Relative yield at heat stress") + 
+  geom_point(shape=1, aes(size=reg_wt)) + theme_bw() + 
+  xlab("") + ylab("") +  
   geom_smooth(method='lm', mapping = aes(weight = reg_wt)) + 
   stat_regline_equation(show.legend = F, label.x.npc = "left", label.y.npc = "top") +
   stat_cor(label.x.npc = "center", label.y.npc = "top") + 
@@ -252,21 +255,45 @@ ggarrange(pcer, pleg, nrow=1, ncol=2)
 ggsave("fig2B_new_ggplot.pdf", width=8.3, height=6)
 ```
 ```{r}
+# Photosynthetic rate data analysis
+# Visualize residuals diagnostics 
+lm_wt <- lm(relative_reduction_in_PS~t_above_optimal*crop, data = pts, weights = n_stress)
+resid_panel(lm_wt)
+```
+
+```{r}
+# Find outliers in the data
+infl = influence(lm_wt)
+str(infl)
+plot(pts$t_above_optimal, infl$hat)
+# Conclusion: throw out the two data point with delta temperature > 19 degrees
+pts <- pts %>% filter(t_above_optimal < 19)
+```
+```{r}
+# Try other models - didn't improve much over the linear. Adjusted R^2 also doesn't change much.
+lm_wt2 <- lm(data = pts, relative_reduction_in_PS ~ poly(t_above_optimal, 2)*crop, weights=n_stress) # x^2
+lm_wt3 <- lm(data = pts, relative_reduction_in_PS ~ poly(t_above_optimal, 3)*crop, weights=n_stress) # x^3
+
+compare_performance(lm_wt, lm_wt2, lm_wt3)
+
+lm_preds <- emmeans(lm_wt3,  ~ crop*t_above_optimal, 
+                    at = list(t_above_optimal = seq(1, 16, 2)))
+lm_preds %>% 
+  as.data.frame() %>% 
+  ggplot(aes(x = t_above_optimal, y = emmean))+
+  facet_grid(cols = vars(crop))+
+  geom_line() +
+  geom_point(data = pts, aes(y = relative_reduction_in_PS))+
+  coord_cartesian(ylim = c(0, 100))
+```
+```{r}
 # Photosynthesis under stress - Figure 1
-summary(lm(pts$relative.reduction.in.PS~pts$t.above.optimal*pts$crop_type))
-# p(temp) NS, p(croptype) = 0.02, p(interaction)=0.064, R^2=22%
+summary(lm_wt)
+# p(temp) NS, p(crop type) = 0.043, p(interaction)=0.102, adjusted R^2=32%
 
 #regression equations for photosynthesis
-summary(lm(relative.reduction.in.PS~t.above.optimal, data = subset(pts, crop_type == "cereals")))
-summary(lm(relative.reduction.in.PS~t.above.optimal, data = subset(pts, crop_type == "legumes")))
-
-temp <- pts[pts$crop_type=="legumes",]
-summary(lm(formula = temp$relative.reduction.in.PS ~ temp$t.above.optimal))
-# p<0.001, R^2=44%, a=98.2, b=-2.5
-
-temp <- pts[pts$crop_type=="cereals",]
-summary(lm(formula = temp$relative.reduction.in.PS ~ temp$t.above.optimal))
-# p=0.2, R^2=1%, a=75.2, b=-0.7
+summary(lm(relative_reduction_in_PS~t_above_optimal, data = subset(pts, crop == "cereals"))) # p=0.03, adjR^2=18%
+summary(lm(relative_reduction_in_PS~t_above_optimal, data = subset(pts, crop == "legumes"))) # p=0.002, adjR^2=40%
 
 # Figure 1
 pts <- pts %>% filter(sd_control!="" & sd_stress!="") %>%
@@ -295,12 +322,4 @@ pleg <- ggplot(data=leg, aes(x=delT, y=relative_reduction_in_PS)) +
   ggtitle("Legumes")
 ggarrange(pcer, pleg, nrow=1, ncol=2)
 ggsave("fig1_new_ggplot.pdf")
-
-# Test photosynthetic rate with multiple regression
-pts_melt <- reshape2::melt(pts, id.vars=c("crop_type", "t.above.optimal"), measure.vars = "relative.reduction.in.PS", value.name="relative.reduction.in.PS") %>%
-select(-variable)
-
-crops_lm <- lm(relative.reduction.in.PS ~ crop_type*t.above.optimal, data=pts_melt)
-summary(crops_lm)
-# crop_type:t.above.optimal p = 0.06, adjusted R^2 = 0.22
 ```
